@@ -7,7 +7,7 @@ const sharp = require('sharp');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Session to track flow state, quality & count
+// Session middleware to track flow state, quality & count
 bot.use(session({
   defaultSession: () => ({
     awaitingQuality: false,
@@ -17,7 +17,7 @@ bot.use(session({
   })
 }));
 
-// Helper: reset & show start menu
+// Helper to reset state and show the start menu
 function sendStartMenu(ctx) {
   ctx.session.awaitingQuality = false;
   ctx.session.awaitingImage   = false;
@@ -31,10 +31,10 @@ function sendStartMenu(ctx) {
   );
 }
 
-// 1. /start
+// 1. /start → reset & show menu
 bot.start(ctx => sendStartMenu(ctx));
 
-// 2. “Compress Images” → ask for quality
+// 2. User taps “Compress Images” → ask for quality
 bot.action('COMPRESS', async ctx => {
   await ctx.answerCbQuery();
   ctx.session.awaitingQuality = true;
@@ -42,64 +42,66 @@ bot.action('COMPRESS', async ctx => {
   return ctx.reply('⚙️ Send desired JPEG quality (1–100):');
 });
 
-// 3. Quality input
+// 3. Handle quality input
 bot.on('text', ctx => {
   if (!ctx.session.awaitingQuality) return;
   const val = parseInt(ctx.message.text.trim(), 10);
   if (isNaN(val) || val < 1 || val > 100) {
-    return ctx.reply('❗ Invalid. Enter a number between 1 and 100.');
+    return ctx.reply('❗ Invalid quality. Enter a number between 1 and 100.');
   }
-  ctx.session.quality         = val;
-  ctx.session.awaitingQuality = false;
-  ctx.session.awaitingImage   = true;
+  ctx.session.quality          = val;
+  ctx.session.awaitingQuality  = false;
+  ctx.session.awaitingImage    = true;
   return ctx.reply(
     `👍 Quality set to ${val}%. Now send me any number of images (photo or file).`
   );
 });
 
-// 4. Photo OR image‐file handler
-bot.on(['photo','document'], async ctx => {
+// 4. Handle photos & image files
+bot.on(['photo', 'document'], async ctx => {
   if (!ctx.session.awaitingImage) {
     return ctx.reply('❗ Tap “Compress Images” and set quality first.');
   }
 
-  // Determine file_id & reject non-images when it’s a document
+  // Determine file_id for photo or image-document
   let fileId;
   if (ctx.message.photo) {
     fileId = ctx.message.photo.pop().file_id;
-  } else if (ctx.message.document 
-             && ctx.message.document.mime_type.startsWith('image/')) {
+  } else if (
+    ctx.message.document &&
+    ctx.message.document.mime_type.startsWith('image/')
+  ) {
     fileId = ctx.message.document.file_id;
   } else {
     return ctx.reply('❗ Please send a photo or an image file.');
   }
 
   try {
-    // download
+    // Download the file
     const link = await ctx.telegram.getFileLink(fileId);
     const resp = await axios.get(link.href, { responseType: 'arraybuffer' });
     const original = Buffer.from(resp.data);
     const origSize = original.length;
 
-    // compress
+    // Compress in-memory
     const compressed = await sharp(original)
       .jpeg({ quality: ctx.session.quality })
       .toBuffer();
-    const compSize    = compressed.length;
-    const reduction   = Math.round((1 - compSize/origSize) * 100);
+    const compSize = compressed.length;
+    const reduction = Math.round((1 - compSize / origSize) * 100);
 
-    // count
+    // Increment counter
     ctx.session.count++;
 
-    // caption
+    // Caption with stats and session count
     const caption =
-      `✅ Compressed (${ctx.session.quality}%):\n` +
+      `✅ Compressed (${ctx.session.quality}% quality)\n` +
       `• Original: ${(origSize/1024).toFixed(1)} KB\n` +
       `• Compressed: ${(compSize/1024).toFixed(1)} KB\n` +
       `• Reduction: ${reduction}%\n` +
       `Images processed: ${ctx.session.count}`;
 
-    // reply & offer Done button
+    // Reply with the compressed image + Done button
     await ctx.replyWithPhoto(
       { source: compressed },
       {
@@ -109,14 +111,13 @@ bot.on(['photo','document'], async ctx => {
         ])
       }
     );
-
   } catch (err) {
     console.error('Compression error:', err);
     return ctx.reply('❗ Oops—could not process your image.');
   }
 });
 
-// 5. Done → summary + start over
+// 5. Done button → summary + “Start Over”
 bot.action('COMPRESS_DONE', async ctx => {
   await ctx.answerCbQuery();
   const total = ctx.session.count;
@@ -130,17 +131,33 @@ bot.action('COMPRESS_DONE', async ctx => {
   );
 });
 
-// 6. Restart
+// 6. Start over handler
 bot.action('RESTART', async ctx => {
   await ctx.answerCbQuery();
   return sendStartMenu(ctx);
 });
 
-// 7. Fallback
+// 7. Fallback for other messages
 bot.on('message', ctx => {
   if (!ctx.session.awaitingQuality && !ctx.session.awaitingImage) {
     return ctx.reply('⚙️ Use /start to begin.');
   }
 });
 
-bot.launch().then(() => console.log('Bot started'));
+module.exports.handler = async function(event, context) {
+  // Handle Netlify Dev health-check GETs
+  if (event.httpMethod === 'GET') {
+    return { statusCode: 200, body: 'OK' };
+  }
+
+  // Now it must be a Telegram POST
+  try {
+    const update = JSON.parse(event.body);
+    await bot.handleUpdate(update, context);
+    
+    return { statusCode: 200, body: 'OK' };
+  } catch (err) {
+    console.error('Error handling update:', err);
+    return { statusCode: 500, body: 'Error' };
+  }
+};
