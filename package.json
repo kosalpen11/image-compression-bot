@@ -1,4 +1,8 @@
 {
+  "name": "telegraf-bot",
+  "scripts": {
+    "start": "node bot.js"
+  },
   "dependencies": {
     "@telegraf/session": "^2.0.0-beta.7",
     "axios": "^1.9.0",
