@@ -2,15 +2,16 @@
 [build]
   command   = "npm install"
   functions = "functions"
-  publish   = "."        # we’re only serving functions, no "public" folder
+  publish   = "."
 
 [dev]
   functions = "functions"
 
-# 1) Redirect root → /bot
+# ------------------------------------------------
+# CATCH-ALL → send EVERYTHING to your bot function
 [[redirects]]
-  from    = "/"
-  to      = "/.netlify/functions/bot"
-  status  = 200
-  force   = true
-  methods = ["GET","POST"]
+  from     = "/*"
+  to       = "/.netlify/functions/bot"
+  status   = 200
+  force    = true
+  methods  = ["GET","POST"]
