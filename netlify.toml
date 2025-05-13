@@ -14,11 +14,3 @@
   status  = 200
   force   = true
   methods = ["GET","POST"]
-
-# 2) Then /bot → your Netlify Function
-[[redirects]]
-  from    = "/bot"
-  to      = "/.netlify/functions/bot"
-  status  = 200
-  force   = true
-  methods = ["GET","POST"]
